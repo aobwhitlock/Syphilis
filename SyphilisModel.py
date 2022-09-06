@@ -1,5 +1,4 @@
 import numpy as np
-from scipy.integrate import solve_ivp
 import matplotlib.pyplot as plt
 
 #Initial population values. Each class begins with one case of primary syphilis

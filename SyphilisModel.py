@@ -52,42 +52,82 @@ beta = 0.003042 #calibrated value
 m = 0.033 #Entry/exit rate
 tau = 0 #Average treatment rate
 
+dt = 0.002 #step size
 
-def transmission(time, current_state, sexclass, beta, m, tau, sig1, sig2, sig3, sig4, sig5, gamma, nu):
+#These are the state values at equilibrium, included here to save time and avoid the burn-in step. To do the burn in, just comment this out.
+init = [71992.9265552007,
+ 2.8953911652140776,
+ 2.518778955310003,
+ 1.2957175588299656,
+ 0.14567462677503484,
+ 0.0056272911838524155,
+ 0.06658057053580357,
+ 0.0,
+ 0.14567462677336082,
+ 14994.107199437365,
+ 2.412115055899345,
+ 2.0983640185071133,
+ 1.0794464904776402,
+ 0.12135975433252022,
+ 0.00468802763218677,
+ 0.055467461028845325,
+ 0.0,
+ 0.12135975433115345,
+ 12980.869066215355,
+ 7.830913829218044,
+ 6.812323388585295,
+ 3.504415110505866,
+ 0.3939935519192813,
+ 0.015219647307794064,
+ 0.18007470521772495,
+ 0.0,
+ 0.39399355191465546]
+
+
+def transmission(time, dt, current_state, sexclass, beta, m, tau, sig1, sig2, sig3, sig4, sig5, gamma, nu):
     '''
+    Compartmental model using Euler
     Input:
-    time: range of steps
+    time: duration
+    dt: step size
     current_state: flat list containing current population values for all classes
     sexclass: list of lists, with each list containing parameters for one behaviour class
     constant model parameters: beta:nu
     
     Output:
-    nStep: flat list containing updated values of current_state 
+    current_state: flat list containing updated values of current_state
+    inf: list of incidence at each time step 
 
     '''
-    step = []
+    steps = int(time/dt)
+    substeps = int(steps/time)
     slices = np.linspace(0, len(current_state), len(sexclass)+1) #get indices of current_state corresponding to each class. len(sexclass) is number of classes. +1 to give endpoint
-    lambdas = get_lambda(current_state, sexclass, beta)
-    nStep = [] #Initialize vector to be returned with the next set of values
-    for i in range(len(sexclass)): # Do the step for each sex activity class
-        X, E, YP, YS, L, EL, YRS, Z, Yt = current_state[int(slices[i]):int(slices[i+1])] #Unpack the values of current_state for each class
-        lam = lambdas[i]
-        N = sexclass[i][1]
-        fX = m*N + tau*YP + tau*YS + gamma*Z - (lam+m)*X
-        fE =  lam*X-(sig1+m)*E
-        fYP = sig1*E -(m+tau+sig2)*YP
-        fYS = sig2*YP - (m+tau+sig3)*YS
-        fEL =  nu*sig3*YS - (m + tau + sig4)*EL
-        fYRS = sig4*EL - (m + tau + sig3)*YRS
-        fL = sig3*YRS + (1 - nu)*sig3*YS - (sig5 + m + tau)*L
-        fYt = sig5*L - (m + tau)*Yt
-        fZ = tau*L + tau*Yt + tau*YRS + tau*EL - (gamma + m)*Z
-        nStep += [fX, fE, fYP, fYS, fL, fEL, fYRS, fZ, fYt]
-    return nStep
-
+    inf = []
+    for i in range(time):
+        inf.append(current_state[2]+current_state[11]+current_state[20])
+        for _ in range(substeps): #iterate through the substeps at each time point
+            lambdas = get_lambda(current_state, sexclass, beta) #Get lambda value for all activity classes
+            nStep = [] #Initialize vector to be returned with the next set of values
+            for i in range(len(sexclass)): # Do the step for each sex activity class
+                X, E, YP, YS, L, EL, YRS, Z, Yt = current_state[int(slices[i]):int(slices[i+1])] #Unpack the values of current_state for each class
+                lam = lambdas[i]
+                N = sexclass[i][1]
+                fX = X + (m*N + tau*YP + tau*YS + gamma*Z - (lam+m)*X)*dt
+                fE =  E + (lam*X-(sig1+m)*E)*dt
+                fYP = YP + (sig1*E -(m+tau+sig2)*YP)*dt
+                fYS = YS + (sig2*YP - (m+tau+sig3)*YS)*dt
+                fEL =  EL + (nu*sig3*YS - (m + tau + sig4)*EL)*dt
+                fYRS = YRS + (sig4*EL - (m + tau + sig3)*YRS)*dt
+                fL = L + (sig3*YRS + (1 - nu)*sig3*YS - (sig5 + m + tau)*L)*dt
+                fYt = Yt + (sig5*L - (m + tau)*Yt)*dt
+                fZ = Z + (tau*L + tau*Yt + tau*YRS + tau*EL - (gamma + m)*Z)*dt
+                nStep += [fX, fE, fYP, fYS, fL, fEL, fYRS, fZ, fYt]
+            current_state = nStep
+    return current_state, inf
 
 def get_lambda(current_state, sexclass, beta):    
     '''
+    Called by transmission() to calculate the lambda for each activity class
     Input:
     current state: list of current state for each behaviour class
     sexclass: list of lists containing parameters for each class 
@@ -113,66 +153,42 @@ def get_lambda(current_state, sexclass, beta):
     return lamList
 
 
-def get_incidence_vals(result,pos, nClasses):
-    '''
-    Input: 
-    result: Flat list of all population values received from solve_ivp()
-    pos: position in list of desired value
-    nClasses: number of sexual behaviour classes
-    
-    Output:
-    inf: list of incidence over time summed over the classes
-    final: summed incidence at the last timestep
-    
-    '''
-    pos = pos-1 # -1 to use as index for the list
-    inf = 0 # initialize list
-    slices = np.linspace(0, len(result.y), nClasses+1) #get indices of current_state corresponding to the first value of each class 
-    for i in range(nClasses):
-        YP = result.y[int(pos+slices[i]),:] # get desired value from each class using pos to offset the first index value of each class
-        inf += YP
-    infFin = inf[-1] #last element of list = last timestep
-    return inf, infFin
+##################################
+## create equilibrium population##
+##################################
+#time = 200000
+#print("Burning in population")
+#eqVals, inf = transmission(time, dt, init, sexclass, beta, m, tau, sig1, sig2, sig3, sig4, sig5, gamma, nu)
+#print("Equilibrium incidence per 100,000 = ", inf[-1])
 
-
-
-# create equilibrium population
-tau=0
-beta = 0.003042
-time = np.linspace(0, 300000, 10) #start time, end time, number of points recorded
-print("Burning in population")
-result = solve_ivp(transmission, (0,300000),init, t_eval = time,args = (sexclass, beta, m, tau, sig1, sig2, sig3, sig4, sig5, gamma, nu)) # model function, duration, initial state, evaluation times, parameters)
-eqVals = result.y[:,-1] #save equilibrium values. -1 is index of last state
-
-print("Equilibrium incidence = 11.425 per 100,000")
 print("Beginning experiment")
-tau = 1.4117 
-time = np.linspace(0, 10, 30)
-result = solve_ivp(transmission, (0,10), eqVals, t_eval = time,args = (sexclass, beta, m, tau, sig1, sig2, sig3, sig4, sig5, gamma, nu))
-inf, final = get_incidence_vals(result, 3, nClasses)
+time = 10
 
-tau = 0
-time = np.linspace(0, 10, 30)
-result = solve_ivp(transmission, (0,10), eqVals, t_eval = time,args = (sexclass, beta, m, tau, sig1, sig2, sig3, sig4, sig5, gamma, nu))
-infUn, finalUn = get_incidence_vals(result, 3, nClasses)
+tau = 1.51 #screened population
+resultTr, infTr = transmission(time, dt, init, sexclass, beta, m, tau, sig1, sig2, sig3, sig4, sig5, gamma, nu)
+
+tau = 0 #unscreened population
+resultUn, infUn = transmission(time, dt, init, sexclass, beta, m, tau, sig1, sig2, sig3, sig4, sig5, gamma, nu)
 
 print("Plotting effects of intervention")
+Years = list(range(time)) #Make a list of years for X axis
+
 #get relative rate
-relInc = 100/finalUn
-relInf = [i*relInc for i in inf] #transform incidence rate 
+relInc = 100/infUn[-1]
+relInf = [i*relInc for i in infTr] #transform incidence rate 
 
 plt.figure(figsize=(10,5))
 plt.subplot(1,2,2)
-plt.plot(time, relInf)
+plt.plot(Years, relInf)
 plt.grid(linewidth=0.1)
 plt.ylabel('% of pre-intervention incidence')
 plt.xlabel('Time in years')
 plt.title('B. Relative incidence following intervention')
-#plt.savefig('RelativeIncidenceReduction.png')
+
 
 plt.subplot(1,2,1)
-plt.plot(time, inf, label='Intervention')
-plt.plot(time, infUn, label='No intervention')
+plt.plot(Years, infTr, label='Intervention')
+plt.plot(Years, infUn, label='No intervention')
 plt.grid(linewidth=0.1)
 plt.legend()
 plt.ylabel('Incidence per 100,000')
@@ -182,22 +198,20 @@ plt.savefig('IncidenceReduction.png')
 plt.clf()
 
 print("Plotting screening interval that leads to eradication")
-tVals = np.linspace(1, 12, 100) #get 100 values for tau between 1 and 12 
-time = np.linspace(0, 20, 2) 
+taus = np.linspace(1, 12, 100) #get 50 values for tau between 1 and 12 
+time = 20
+inf20 = [] #make an empty list which will have the incidence at time 20 for each tau
 
-# Run simulation for each tVal to get the end incidence for each value
-endV = [] 
-for t in tVals:
-    tau = t
-    result = solve_ivp(transmission, (0,20), eqVals, t_eval = time,args = (sexclass, beta, m, tau, sig1, sig2, sig3, sig4, sig5, gamma, nu))
-    inf, final = get_incidence_vals(result, 3, nClasses)
-    endV.append(final)
+#test each value
+for tau in taus:
+    endstate, inf = transmission(time, dt, init, sexclass, beta, m, tau, sig1, sig2, sig3, sig4, sig5, gamma, nu)
+    inf20.append(inf[-1])
 
-tInt = [12/i for i in tVals] #convert tau to screening intervals
+tInt = [12/i for i in taus] #convert tau to screening intervals
 
 # plot screening interval
 plt.figure(figsize=(5,5))
-plt.plot(tInt, endV)
+plt.plot(tInt, inf20)
 plt.grid(linewidth=0.1)
 plt.ylabel('Incidence at 20 years')
 plt.xlabel('Screening interval in months')

@@ -193,7 +193,7 @@ plt.grid(linewidth=0.1)
 plt.legend()
 plt.ylabel('Incidence per 100,000')
 plt.xlabel('Time in years')
-plt.title('A. Syphillis incidence')
+plt.title('A. Syphilis incidence')
 plt.savefig('IncidenceReduction.png')
 plt.clf()
 
